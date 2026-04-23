@@ -1,0 +1,532 @@
+<!DOCTYPE html>
+<html lang="sv">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Samåkning & Event</title>
+    
+    <!-- Leaflet CSS -->
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+    
+    <style>
+        :root {
+            --primary: #0284c7;
+            --primary-hover: #0369a1;
+            --bg: #f1f5f9;
+            --text: #0f172a;
+            --card-bg: #ffffff;
+            --border: #cbd5e1;
+        }
+
+        * { box-sizing: border-box; }
+
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            margin: 0;
+            display: flex;
+            flex-direction: column;
+            height: 100vh;
+            background-color: var(--bg);
+            color: var(--text);
+        }
+
+        header {
+            background: var(--card-bg);
+            padding: 1rem 2rem;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+            z-index: 1000;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+        }
+
+        header select {
+            padding: 8px 12px;
+            font-size: 1rem;
+            border-radius: 6px;
+            border: 1px solid var(--border);
+            width: 300px;
+        }
+
+        .main-container {
+            display: flex;
+            flex: 1;
+            overflow: hidden;
+        }
+
+        /* Vänsterpanel */
+        #sidebar {
+            width: 450px;
+            display: flex;
+            flex-direction: column;
+            background: var(--card-bg);
+            border-right: 1px solid var(--border);
+            z-index: 10;
+        }
+
+        /* Tab-meny */
+        .tabs {
+            display: flex;
+            border-bottom: 1px solid var(--border);
+        }
+        .tab-btn {
+            flex: 1;
+            padding: 15px;
+            background: #f8fafc;
+            border: none;
+            border-bottom: 3px solid transparent;
+            cursor: pointer;
+            font-weight: bold;
+            font-size: 1rem;
+            color: #64748b;
+        }
+        .tab-btn.active {
+            background: white;
+            color: var(--primary);
+            border-bottom-color: var(--primary);
+        }
+
+        .tab-content {
+            display: none;
+            padding: 20px;
+            overflow-y: auto;
+            flex: 1;
+        }
+        .tab-content.active { display: block; }
+
+        /* Formulär och Kort */
+        .form-group {
+            margin-bottom: 15px;
+            display: flex;
+            flex-direction: column;
+            gap: 5px;
+        }
+
+        .form-group label { font-weight: 600; font-size: 0.9rem; }
+        .checkbox-group { flex-direction: row; align-items: center; gap: 10px; }
+
+        input[type="text"], input[type="number"], input[type="email"], input[type="tel"] {
+            padding: 10px;
+            border: 1px solid var(--border);
+            border-radius: 6px;
+            font-size: 1rem;
+        }
+
+        button.btn {
+            background: var(--primary);
+            color: white;
+            border: none;
+            padding: 12px;
+            border-radius: 6px;
+            cursor: pointer;
+            font-weight: bold;
+            font-size: 1rem;
+            width: 100%;
+            transition: background 0.2s;
+        }
+        button.btn:hover { background: var(--primary-hover); }
+        button.btn:disabled { background: #94a3b8; cursor: not-allowed; }
+
+        .ride-card {
+            border: 1px solid var(--border);
+            padding: 15px;
+            border-radius: 8px;
+            margin-bottom: 15px;
+            background: #fff;
+            box-shadow: 0 1px 3px rgba(0,0,0,0.05);
+        }
+
+        .ride-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px; }
+        .ride-header h3 { margin: 0; font-size: 1.1rem; }
+        .badge { background: #e2e8f0; padding: 4px 8px; border-radius: 12px; font-size: 0.8rem; font-weight: bold; }
+        .badge.gas { background: #dcfce7; color: #166534; }
+        
+        /* Modal för bokning */
+        .modal-overlay {
+            display: none;
+            position: fixed;
+            top: 0; left: 0; right: 0; bottom: 0;
+            background: rgba(0,0,0,0.5);
+            z-index: 2000;
+            align-items: center;
+            justify-content: center;
+        }
+        .modal {
+            background: white;
+            padding: 25px;
+            border-radius: 8px;
+            width: 400px;
+            max-width: 90%;
+            box-shadow: 0 10px 25px rgba(0,0,0,0.2);
+        }
+        .modal h2 { margin-top: 0; }
+        .modal-actions { display: flex; gap: 10px; margin-top: 20px; }
+        .btn-outline { background: white; color: var(--text); border: 1px solid var(--border); }
+
+        /* Karta */
+        #map-container { flex: 1; position: relative; }
+        #map { height: 100%; width: 100%; }
+
+        @media (max-width: 768px) {
+            .main-container { flex-direction: column; }
+            #sidebar { width: 100%; height: 50%; }
+            #map-container { height: 50%; }
+            header { flex-direction: column; align-items: flex-start; gap: 10px; }
+            header select { width: 100%; }
+        }
+    </style>
+</head>
+<body>
+
+    <header>
+        <h1 style="margin: 0; font-size: 1.5rem; color: var(--primary);">🚗 Samåkning</h1>
+        <div>
+            <select id="event-select" onchange="changeEvent()">
+                <option value="">Laddar event...</option>
+            </select>
+        </div>
+    </header>
+
+    <div class="main-container">
+        <!-- Vänsterpanel -->
+        <div id="sidebar">
+            <div class="tabs">
+                <button class="tab-btn active" onclick="switchTab('find')">Hitta skjuts</button>
+                <button class="tab-btn" onclick="switchTab('offer')">Erbjud skjuts</button>
+            </div>
+
+            <!-- Tab: Hitta skjuts -->
+            <div id="tab-find" class="tab-content active">
+                <h2>Tillgängliga resor</h2>
+                <div id="rides-list">
+                    <!-- Resor laddas här -->
+                </div>
+            </div>
+
+            <!-- Tab: Erbjud skjuts -->
+            <div id="tab-offer" class="tab-content">
+                <h2>Registrera din bil</h2>
+                <div class="form-group">
+                    <label>För- och efternamn (Förare)</label>
+                    <input type="text" id="driver-name" placeholder="T.ex. Anna Andersson">
+                </div>
+                <div class="form-group">
+                    <label>Åker ifrån (Stad / Ort)</label>
+                    <input type="text" id="driver-from" placeholder="T.ex. Malmö">
+                </div>
+                <div class="form-group" style="flex-direction: row; gap: 15px;">
+                    <div style="flex: 1;">
+                        <label>Antal lediga platser</label>
+                        <input type="number" id="driver-seats" min="1" max="8" value="3" style="width: 100%;">
+                    </div>
+                </div>
+                <div class="form-group checkbox-group">
+                    <input type="checkbox" id="driver-gas" checked>
+                    <label for="driver-gas">Jag vill att vi delar på bensinkostnaden</label>
+                </div>
+                <button class="btn" onclick="offerRide()" id="offer-btn">Lägg upp resa</button>
+            </div>
+        </div>
+
+        <!-- Högerpanel: Karta -->
+        <div id="map-container">
+            <div id="map"></div>
+        </div>
+    </div>
+
+    <!-- Boknings-modal -->
+    <div class="modal-overlay" id="booking-modal">
+        <div class="modal">
+            <h2>Boka plats</h2>
+            <p id="booking-info" style="color: #64748b; font-size: 0.9rem; margin-bottom: 15px;"></p>
+            
+            <div class="form-group">
+                <label>Förnamn</label>
+                <input type="text" id="book-fname">
+            </div>
+            <div class="form-group">
+                <label>Efternamn</label>
+                <input type="text" id="book-lname">
+            </div>
+            <div class="form-group">
+                <label>Mejladress</label>
+                <input type="email" id="book-email">
+            </div>
+            <div class="form-group">
+                <label>Telefonnummer</label>
+                <input type="tel" id="book-phone">
+            </div>
+            
+            <div class="modal-actions">
+                <button class="btn btn-outline" onclick="closeModal()">Avbryt</button>
+                <button class="btn" onclick="confirmBooking()">Slutför bokning</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Leaflet JS -->
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+
+    <script>
+        // --- State Management ---
+        let events =[];
+        let currentEvent = null;
+        let rides =[];
+        let selectedRideIdForBooking = null;
+
+        // Enkel cache för geokodning så vi slipper anropa API:et upprepade gånger i onödan
+        const geoCache = {
+            "Stockholm": { lat: 59.3293, lng: 18.0686 },
+            "Göteborg": { lat: 57.7089, lng: 11.9746 },
+            "Malmö": { lat: 55.6050, lng: 13.0038 }
+        };
+
+        // --- Initiera Kartan ---
+        const map = L.map('map').setView([62.0, 15.0], 5);
+        L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+            attribution: '© OpenStreetMap'
+        }).addTo(map);
+
+        const mapLayer = L.layerGroup().addTo(map);
+        const destinationIcon = L.icon({
+            iconUrl: 'https://raw.githubusercontent.com/pointhi/leaflet-color-markers/master/img/marker-icon-2x-red.png',
+            shadowUrl: 'https://cdnjs.cloudflare.com/ajax/libs/leaflet/0.7.7/images/marker-shadow.png',
+            iconSize: [25, 41], iconAnchor: [12, 41], popupAnchor: [1, -34], shadowSize: [41, 41]
+        });
+
+        // --- Hämta Event från API ---
+        async function fetchEvents() {
+            try {
+                const response = await fetch('https://ambitionsverige.se/wp-json/amb/v1/events');
+                if(!response.ok) throw new Error("Kunde inte hämta event");
+                events = await response.json();
+            } catch (error) {
+                console.warn("API blockerat eller nere. Använder demodata.", error);
+                events =[
+                    { title: "Seniorfestival Göteborg", place: "Göteborg", day: "21-22", month: "april" },
+                    { title: "Almedalsveckan 2026", place: "Visby", day: "22-26", month: "juni" },
+                    { title: "Seniordagen Stockholm", place: "Stockholm", day: "5", month: "maj" }
+                ];
+            }
+            populateEventDropdown();
+        }
+
+        function populateEventDropdown() {
+            const select = document.getElementById('event-select');
+            select.innerHTML = '';
+            events.forEach((ev, index) => {
+                const option = document.createElement('option');
+                option.value = index;
+                option.textContent = `${ev.title} (${ev.day} ${ev.month}) - ${ev.place}`;
+                select.appendChild(option);
+            });
+            changeEvent(); // Trigga val av första eventet
+        }
+
+        async function changeEvent() {
+            const select = document.getElementById('event-select');
+            currentEvent = events[select.value];
+            
+            // Geokoda destinationen
+            const coords = await geocode(currentEvent.place);
+            currentEvent.lat = coords.lat;
+            currentEvent.lng = coords.lng;
+
+            // Filtrera resor för just detta event (Skapar mockdata om listan är tom)
+            if (rides.filter(r => r.eventTitle === currentEvent.title).length === 0) {
+                generateMockRidesForEvent();
+            }
+
+            renderUI();
+        }
+
+        // --- Geokodning (Gör ortsnamn till Lat/Lng) ---
+        async function geocode(placeName) {
+            // Rensa upp strängen (t.ex. "Visby, Gotland" -> "Visby") för bättre träffar
+            const query = placeName.split(',')[0].trim();
+            if(geoCache[query]) return geoCache[query];
+
+            try {
+                const res = await fetch(`https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(query + ', Sverige')}`);
+                const data = await res.json();
+                if(data && data.length > 0) {
+                    geoCache[query] = { lat: parseFloat(data[0].lat), lng: parseFloat(data[0].lon) };
+                    return geoCache[query];
+                }
+            } catch(e) { console.error("Geocoding error", e); }
+            
+            return { lat: 60.1282, lng: 18.6435 }; // Fallback Sverige-center
+        }
+
+        // --- Logik för Resor ---
+        async function offerRide() {
+            const btn = document.getElementById('offer-btn');
+            const name = document.getElementById('driver-name').value;
+            const from = document.getElementById('driver-from').value;
+            const seats = parseInt(document.getElementById('driver-seats').value);
+            const shareGas = document.getElementById('driver-gas').checked;
+
+            if(!name || !from) return alert("Fyll i namn och var du åker ifrån.");
+
+            btn.disabled = true;
+            btn.textContent = "Hittar plats på kartan...";
+
+            const coords = await geocode(from);
+
+            const newRide = {
+                id: Date.now(),
+                eventTitle: currentEvent.title,
+                driver: name,
+                from: from,
+                lat: coords.lat,
+                lng: coords.lng,
+                seats: seats,
+                shareGas: shareGas,
+                passengers:[]
+            };
+
+            rides.push(newRide);
+            
+            // Återställ formulär
+            document.getElementById('driver-name').value = '';
+            document.getElementById('driver-from').value = '';
+            btn.disabled = false;
+            btn.textContent = "Lägg upp resa";
+
+            switchTab('find'); // Hoppa över till listan
+            renderUI();
+            map.flyTo([coords.lat, coords.lng], 6);
+        }
+
+        function generateMockRidesForEvent() {
+            // Lägger in en liten fördröjning i async mock data
+            setTimeout(async () => {
+                const mockCities = ["Uppsala", "Örebro", "Linköping"];
+                const city = mockCities[Math.floor(Math.random() * mockCities.length)];
+                const coords = await geocode(city);
+                
+                rides.push({
+                    id: Math.random(),
+                    eventTitle: currentEvent.title,
+                    driver: "Exempelförare",
+                    from: city,
+                    lat: coords.lat, lng: coords.lng,
+                    seats: 3,
+                    shareGas: true,
+                    passengers:[]
+                });
+                renderUI();
+            }, 500);
+        }
+
+        // --- Bokningslogik ---
+        function openBookingModal(rideId) {
+            selectedRideIdForBooking = rideId;
+            const ride = rides.find(r => r.id === rideId);
+            document.getElementById('booking-info').textContent = `Bokar plats hos ${ride.driver} från ${ride.from}.`;
+            document.getElementById('booking-modal').style.display = 'flex';
+        }
+
+        function closeModal() {
+            document.getElementById('booking-modal').style.display = 'none';
+            // Rensa fält
+            ['fname', 'lname', 'email', 'phone'].forEach(id => document.getElementById(`book-${id}`).value = '');
+        }
+
+        function confirmBooking() {
+            const fName = document.getElementById('book-fname').value;
+            const lName = document.getElementById('book-lname').value;
+            const email = document.getElementById('book-email').value;
+            const phone = document.getElementById('book-phone').value;
+
+            if(!fName || !lName || !email || !phone) return alert("Vänligen fyll i alla fält.");
+
+            const ride = rides.find(r => r.id === selectedRideIdForBooking);
+            
+            if(ride.seats > 0) {
+                ride.passengers.push({ name: `${fName} ${lName}`, email, phone });
+                ride.seats--;
+                alert(`Bokning bekräftad! Ett mejl har (fiktivt) skickats till ${email}.`);
+                closeModal();
+                renderUI();
+            } else {
+                alert("Tyvärr, bilen blev precis full.");
+                closeModal();
+            }
+        }
+
+        // --- UI och Rendering ---
+        function switchTab(tab) {
+            document.querySelectorAll('.tab-content').forEach(el => el.classList.remove('active'));
+            document.querySelectorAll('.tab-btn').forEach(el => el.classList.remove('active'));
+            
+            document.getElementById(`tab-${tab}`).classList.add('active');
+            event.target.classList.add('active');
+        }
+
+        function renderUI() {
+            if(!currentEvent) return;
+
+            // 1. Rensa lista och karta
+            const listEl = document.getElementById('rides-list');
+            listEl.innerHTML = '';
+            mapLayer.clearLayers();
+
+            // 2. Sätt ut Mål-markör för Eventet
+            L.marker([currentEvent.lat, currentEvent.lng], {icon: destinationIcon})
+                .addTo(mapLayer)
+                .bindPopup(`<b>${currentEvent.title}</b><br>${currentEvent.place}`)
+                .openPopup();
+
+            // 3. Loopa igenom resor kopplade till aktuellt event
+            const eventRides = rides.filter(r => r.eventTitle === currentEvent.title);
+            
+            if(eventRides.length === 0) {
+                listEl.innerHTML = '<p style="color: #64748b;">Inga resor registrerade för detta event ännu. Bli den första att erbjuda skjuts!</p>';
+                return;
+            }
+
+            eventRides.forEach(ride => {
+                // Rita kort i listan
+                const isFull = ride.seats === 0;
+                const card = document.createElement('div');
+                card.className = 'ride-card';
+                card.innerHTML = `
+                    <div class="ride-header">
+                        <h3>${ride.driver}</h3>
+                        <span class="badge" style="${isFull ? 'background: #fee2e2; color: #991b1b;' : ''}">
+                            ${isFull ? 'Fullsatt' : `💺 ${ride.seats} platser`}
+                        </span>
+                    </div>
+                    <p style="margin: 5px 0;"><strong>Från:</strong> ${ride.from}</p>
+                    ${ride.shareGas ? '<p style="margin: 5px 0;"><span class="badge gas">⛽ Delad bensinkostnad</span></p>' : ''}
+                    <button class="btn" style="margin-top: 10px; padding: 8px;" 
+                            ${isFull ? 'disabled' : ''} 
+                            onclick="openBookingModal(${ride.id})">
+                        ${isFull ? 'Inga platser kvar' : 'Boka plats'}
+                    </button>
+                `;
+                listEl.appendChild(card);
+
+                // Rita startpunkt på kartan
+                L.marker([ride.lat, ride.lng])
+                    .addTo(mapLayer)
+                    .bindPopup(`<b>${ride.driver}</b><br>Från: ${ride.from}<br>Platser kvar: ${ride.seats}`);
+
+                // Dra streck (Polyline)
+                L.polyline([[ride.lat, ride.lng], [currentEvent.lat, currentEvent.lng]], {
+                    color: '#0284c7', weight: 3, opacity: 0.6, dashArray: '10, 10', lineJoin: 'round'
+                }).addTo(mapLayer);
+            });
+            
+            // Anpassa zoom så alla markörer syns
+            const bounds = L.latLngBounds([[currentEvent.lat, currentEvent.lng], ...eventRides.map(r => [r.lat, r.lng])]);
+            if(eventRides.length > 0) map.fitBounds(bounds, { padding:[50, 50] });
+        }
+
+        // Starta!
+        fetchEvents();
+
+    </script>
+</body>
+</html>
