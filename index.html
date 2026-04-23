@@ -431,12 +431,12 @@
             "regeringsgatan 21 stockholom": { lat: 59.33457, lng: 18.06873 }
         };
         const demoRideBlueprints = [
-            { driver: "Anna Andersson", from: "Malmö", seats: 3 },
-            { driver: "Johan Eriksson", from: "Uppsala", seats: 2 },
-            { driver: "Fatima Ali", from: "Västerås", seats: 4 },
-            { driver: "Lars Pettersson", from: "Örebro", seats: 1 },
-            { driver: "Sara Lind", from: "Linköping", seats: 2 },
-            { driver: "Mikael Berg", from: "Helsingborg", seats: 3 }
+            { driver: "Anna Andersson", from: "Malmö", seats: 3, shareFuelCost: true },
+            { driver: "Johan Eriksson", from: "Uppsala", seats: 2, shareFuelCost: false },
+            { driver: "Fatima Ali", from: "Västerås", seats: 4, shareFuelCost: true },
+            { driver: "Lars Pettersson", from: "Örebro", seats: 1, shareFuelCost: false },
+            { driver: "Sara Lind", from: "Linköping", seats: 2, shareFuelCost: true },
+            { driver: "Mikael Berg", from: "Helsingborg", seats: 3, shareFuelCost: false }
         ];
         const routeAnchors = {
             nynashamn: { lat: 58.9039, lng: 17.9479, label: "Nynäshamn" },
@@ -570,7 +570,8 @@
                         from: blueprint.from,
                         lat: coords.lat,
                         lng: coords.lng,
-                        seats: blueprint.seats
+                        seats: blueprint.seats,
+                        shareFuelCost: blueprint.shareFuelCost
                     });
                 }
             }
@@ -688,7 +689,8 @@
             const coords = await geocode(fromInput.value);
             rides.push({
                 id: Date.now(), event: activeEvent.title, driver: nameInput.value,
-                from: fromInput.value, lat: coords.lat, lng: coords.lng, seats: parseInt(seatsInput.value)
+                from: fromInput.value, lat: coords.lat, lng: coords.lng, seats: parseInt(seatsInput.value),
+                shareFuelCost: null
             });
 
             // Rensa formulär (UX förbättring)
@@ -726,6 +728,11 @@
             filtered.forEach(r => {
                 const card = document.createElement('div');
                 const routeInfo = getRouteSegments(r, activeEvent);
+                const fuelCostText = r.shareFuelCost === true
+                    ? 'Vill dela bensinkostnaden'
+                    : r.shareFuelCost === false
+                        ? 'Bjuder på bensinkostnaden'
+                        : 'Bensinkostnad ej angiven';
                 const ferryNote = routeInfo.skippedWaterCrossing
                     ? `<div style="margin-top:10px; color:#0f766e; font-size:0.85rem;">Via färjeläge. Ingen linje visas över vatten.</div>`
                     : '';
@@ -741,6 +748,9 @@
                     <div class="icon-row" style="color:#64748b; margin-bottom:15px; font-size:0.95rem;">
                         ${icon('pin', 'color:#64748b')}
                         <span>Åker från: <b>${r.from}</b></span>
+                    </div>
+                    <div style="margin-bottom:15px; color:${r.shareFuelCost === true ? '#92400e' : '#475569'}; font-size:0.92rem; font-weight:600;">
+                        ${fuelCostText}
                     </div>
                     ${ferryNote}
                     <button class="btn ${r.seats === 0 ? 'btn-outline' : ''}" style="padding:12px; font-size:0.95rem;" 
