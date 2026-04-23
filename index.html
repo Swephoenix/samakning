@@ -1,0 +1,842 @@
+<!DOCTYPE html>
+<html lang="sv">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Samåkning - Optimerad UX</title>
+    
+    <!-- Leaflet CSS -->
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+    
+    <style>
+        :root {
+            --primary: #0ea5e9;
+            --primary-hover: #0284c7;
+            --bg: #f8fafc;
+            --text: #0f172a;
+            --border: #e2e8f0;
+            --surface: #ffffff;
+            --success: #10b981;
+            --error: #ef4444;
+            --brand-blue: #1f4b7d;
+            --brand-yellow: #f3b300;
+            --splash-night: #07111f;
+            --splash-mist: rgba(255, 255, 255, 0.7);
+            --scrollbar-size: 40px; /* Bibehåller 1cm klickyta */
+        }
+
+        /* --- SMART TJOCK SCROLLBAR --- 
+           Klickytan är 40px bred, men den visuella listen är tunnare 
+           och ser därmed elegant ut. */
+        ::-webkit-scrollbar {
+            width: var(--scrollbar-size);
+            height: var(--scrollbar-size);
+        }
+        ::-webkit-scrollbar-track {
+            background: transparent;
+        }
+        ::-webkit-scrollbar-thumb {
+            background-color: #cbd5e1;
+            /* Detta är UX-tricket: En tjock osynlig kant gör själva greppet smalare visuellt, men hitboxen är stor */
+            border: 12px solid transparent; 
+            background-clip: padding-box;
+            border-radius: 20px;
+        }
+        ::-webkit-scrollbar-thumb:hover {
+            background-color: #94a3b8;
+            border: 10px solid transparent; /* Blir lite tjockare vid hover */
+        }
+
+        * { box-sizing: border-box; }
+        body {
+            font-family: 'Segoe UI', system-ui, -apple-system, sans-serif;
+            margin: 0; display: flex; flex-direction: column; height: 100vh;
+            overflow: hidden; background: var(--bg); color: var(--text);
+        }
+
+        body.splash-active {
+            overflow: hidden;
+        }
+
+        #app-shell {
+            display: contents;
+        }
+
+        #splash-screen {
+            position: fixed;
+            inset: 0;
+            z-index: 4000;
+            overflow: hidden;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            background:
+                radial-gradient(circle at 18% 20%, rgba(243, 179, 0, 0.28), transparent 28%),
+                radial-gradient(circle at 82% 18%, rgba(14, 165, 233, 0.18), transparent 26%),
+                linear-gradient(145deg, #f6fbff 0%, #e9f2fb 38%, #ffffff 100%);
+            transition: opacity 0.7s ease, visibility 0.7s ease, transform 0.7s ease;
+        }
+
+        #splash-screen::before {
+            content: "";
+            position: absolute;
+            inset: 0;
+            background:
+                linear-gradient(115deg, rgba(255,255,255,0.2), transparent 35%),
+                repeating-linear-gradient(90deg, transparent 0 42px, rgba(31, 75, 125, 0.04) 42px 43px);
+            opacity: 0.7;
+            pointer-events: none;
+        }
+
+        #splash-screen.hidden {
+            opacity: 0;
+            visibility: hidden;
+            transform: scale(1.02);
+            pointer-events: none;
+        }
+
+        .splash-panel {
+            position: relative;
+            width: min(540px, calc(100vw - 40px));
+            padding: 18px;
+            border-radius: 32px;
+            background: rgba(255, 255, 255, 0.76);
+            border: 1px solid rgba(255, 255, 255, 0.85);
+            box-shadow: 0 30px 80px rgba(20, 45, 74, 0.18);
+            backdrop-filter: blur(18px);
+            overflow: hidden;
+        }
+
+        .splash-panel::after {
+            content: "";
+            position: absolute;
+            inset: auto -40px -56px auto;
+            width: 180px;
+            height: 180px;
+            border-radius: 50%;
+            background: radial-gradient(circle, rgba(243,179,0,0.22), rgba(243,179,0,0));
+            pointer-events: none;
+        }
+
+        .splash-title {
+            margin: 0 0 14px;
+            text-align: center;
+            font-size: clamp(1.6rem, 4vw, 2.4rem);
+            line-height: 1;
+            letter-spacing: -0.04em;
+            color: var(--brand-blue);
+            text-shadow: 0 1px 0 rgba(255,255,255,0.55);
+        }
+
+        .splash-hero {
+            position: relative;
+            min-height: 340px;
+            border-radius: 26px;
+            overflow: hidden;
+            background: #dfe8f1;
+        }
+
+        .splash-photo {
+            position: absolute;
+            inset: 0;
+            width: 100%;
+            height: 100%;
+            object-fit: cover;
+            object-position: center;
+            transform: scale(1.04);
+            animation: splashPhotoReveal 1.6s ease both;
+        }
+
+        @keyframes splashPhotoReveal {
+            from { opacity: 0; transform: scale(1.12); }
+            to { opacity: 1; transform: scale(1.04); }
+        }
+
+        /* TOAST NOTIFICATION */
+        #toast {
+            position: fixed; top: -100px; left: 50%; transform: translateX(-50%);
+            background: var(--surface); color: var(--text); padding: 15px 25px;
+            border-radius: 50px; box-shadow: 0 10px 25px rgba(0,0,0,0.1);
+            font-weight: bold; z-index: 9999; transition: top 0.4s cubic-bezier(0.68, -0.55, 0.265, 1.55);
+            display: flex; align-items: center; gap: 10px;
+        }
+        #toast.show { top: 20px; }
+
+        header {
+            background: var(--surface); padding: 15px 30px;
+            border-bottom: 1px solid var(--border); box-shadow: 0 2px 10px rgba(0,0,0,0.02);
+            z-index: 100;
+        }
+
+        /* TIMELINE */
+        #timeline-container {
+            background: var(--surface); display: flex; gap: 15px; padding: 20px 30px;
+            overflow-x: auto; border-bottom: 1px solid var(--border);
+            scroll-behavior: smooth;
+        }
+        .timeline-item {
+            min-width: 220px; padding: 15px 20px; background: var(--bg);
+            border: 2px solid transparent; border-radius: 12px;
+            cursor: pointer; transition: all 0.2s ease;
+        }
+        .timeline-item:hover { background: #f1f5f9; }
+        .timeline-item.active {
+            border-color: var(--primary); background: #f0f9ff;
+            box-shadow: 0 4px 12px rgba(14, 165, 233, 0.15);
+        }
+
+        /* MAIN CONTENT */
+        .main-content { display: flex; flex: 1; overflow: hidden; }
+
+        #sidebar {
+            width: 480px; display: flex; flex-direction: column;
+            background: var(--surface); border-right: 1px solid var(--border);
+            z-index: 10; box-shadow: 2px 0 15px rgba(0,0,0,0.03);
+        }
+
+        .tab-content { flex: 1; overflow-y: auto; padding: 30px; }
+
+        #map-container { flex: 1; position: relative; }
+        #map { height: 100%; width: 100%; }
+
+        /* UI ELEMENTS */
+        .tabs { display: flex; border-bottom: 1px solid var(--border); }
+        .tab-btn {
+            flex: 1; padding: 18px; border: none; background: transparent;
+            cursor: pointer; font-weight: bold; font-size: 1rem; color: #64748b;
+            border-bottom: 3px solid transparent; transition: 0.2s;
+        }
+        .tab-btn:hover { color: var(--text); }
+        .tab-btn.active { color: var(--primary); border-bottom-color: var(--primary); }
+
+        .form-group { margin-bottom: 20px; }
+        label { display: block; margin-bottom: 8px; font-size: 0.9rem; font-weight: 600; color: #475569; }
+        input { 
+            width: 100%; padding: 14px; border: 1px solid #cbd5e1; 
+            border-radius: 8px; font-size: 1rem; transition: border 0.2s;
+        }
+        input:focus { outline: none; border-color: var(--primary); box-shadow: 0 0 0 3px rgba(14,165,233,0.1); }
+        
+        .btn {
+            background: var(--primary); color: white; border: none;
+            padding: 16px; border-radius: 8px; width: 100%;
+            font-weight: bold; font-size: 1rem; cursor: pointer; transition: 0.2s;
+        }
+        .btn:hover { background: var(--primary-hover); transform: translateY(-1px); }
+        .btn-outline { background: transparent; color: var(--text); border: 1px solid #cbd5e1; }
+        .btn-outline:hover { background: #f1f5f9; border-color: #94a3b8; }
+
+        .ride-card {
+            border: 1px solid var(--border); padding: 20px;
+            border-radius: 12px; margin-bottom: 15px; transition: 0.2s;
+        }
+        .ride-card:hover { border-color: #cbd5e1; box-shadow: 0 4px 12px rgba(0,0,0,0.05); }
+
+        /* MODAL */
+        .modal-overlay {
+            display: none; position: fixed; top: 0; left: 0; right: 0; bottom: 0;
+            background: rgba(15, 23, 42, 0.6); backdrop-filter: blur(4px);
+            z-index: 2000; align-items: center; justify-content: center;
+            opacity: 0; transition: opacity 0.3s;
+        }
+        .modal { 
+            background: var(--surface); padding: 40px; border-radius: 20px; 
+            width: 450px; max-width: 90%; transform: scale(0.95); transition: transform 0.3s;
+            box-shadow: 0 25px 50px -12px rgba(0,0,0,0.25);
+        }
+
+        /* Empty state container */
+        .empty-state { text-align: center; padding: 40px 20px; }
+        .empty-state p { color: #64748b; margin-bottom: 20px; font-size: 1.1rem; }
+        .icon {
+            width: 1.1em;
+            height: 1.1em;
+            display: inline-block;
+            vertical-align: -0.15em;
+            flex: 0 0 auto;
+        }
+        .icon-lg {
+            width: 3rem;
+            height: 3rem;
+        }
+        .icon-row {
+            display: inline-flex;
+            align-items: center;
+            gap: 8px;
+        }
+        .toast-icon {
+            width: 1.2rem;
+            height: 1.2rem;
+        }
+
+        @media (max-width: 768px) {
+            .main-content { flex-direction: column; }
+            #sidebar { width: 100%; height: 55vh; }
+            #map-container { height: 45vh; }
+            .splash-panel {
+                padding: 14px;
+                border-radius: 26px;
+            }
+            .splash-hero {
+                min-height: 260px;
+            }
+        }
+    </style>
+</head>
+<body class="splash-active">
+
+    <div id="splash-screen" aria-hidden="true">
+        <div class="splash-panel">
+            <h1 class="splash-title">Samåkningsportalen</h1>
+            <div class="splash-hero">
+                <img class="splash-photo" src="./2026-04-24_00-02.png" alt="Ambition Sverige-bil" />
+            </div>
+        </div>
+    </div>
+
+    <div id="app-shell">
+
+    <svg width="0" height="0" style="position:absolute;visibility:hidden" aria-hidden="true" focusable="false">
+        <symbol id="icon-car" viewBox="0 0 24 24">
+            <path d="M6.5 8.5 8.2 5.8A2 2 0 0 1 9.9 5h4.2a2 2 0 0 1 1.7.8l1.7 2.7h1.2a2.3 2.3 0 0 1 2.3 2.3v4.4a1.8 1.8 0 0 1-1.8 1.8h-.7a2.5 2.5 0 0 1-5 0h-3a2.5 2.5 0 0 1-5 0h-.7A1.8 1.8 0 0 1 3 15.2v-4.4a2.3 2.3 0 0 1 2.3-2.3h1.2Z" fill="currentColor"/>
+            <circle cx="8" cy="17" r="1.5" fill="var(--surface)"/>
+            <circle cx="16" cy="17" r="1.5" fill="var(--surface)"/>
+            <path d="M8.7 7h6.6l1 1.5H7.7L8.7 7Z" fill="var(--surface)" opacity="0.9"/>
+        </symbol>
+        <symbol id="icon-pin" viewBox="0 0 24 24">
+            <path d="M12 21s6-5.8 6-11a6 6 0 1 0-12 0c0 5.2 6 11 6 11Z" fill="currentColor"/>
+            <circle cx="12" cy="10" r="2.4" fill="var(--surface)"/>
+        </symbol>
+        <symbol id="icon-seat" viewBox="0 0 24 24">
+            <path d="M8 4a2.5 2.5 0 0 1 2.5 2.5V11a2 2 0 0 0 2 2H16a3 3 0 0 1 3 3v1H5v-6.5A2.5 2.5 0 0 1 7.5 8H8V6.5A2.5 2.5 0 0 1 8 4Z" fill="currentColor"/>
+            <path d="M5 18h14v2H5z" fill="currentColor"/>
+        </symbol>
+        <symbol id="icon-check" viewBox="0 0 24 24">
+            <circle cx="12" cy="12" r="10" fill="currentColor"/>
+            <path d="m8.5 12.3 2.3 2.3 4.8-5.2" fill="none" stroke="var(--surface)" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/>
+        </symbol>
+        <symbol id="icon-error" viewBox="0 0 24 24">
+            <circle cx="12" cy="12" r="10" fill="currentColor"/>
+            <path d="M9 9l6 6m0-6-6 6" fill="none" stroke="var(--surface)" stroke-width="2.2" stroke-linecap="round"/>
+        </symbol>
+    </svg>
+
+    <div id="toast"><span class="icon-row"><svg class="icon toast-icon" style="color:var(--success)"><use href="#icon-check"></use></svg><span>Klar!</span></span></div>
+
+    <header>
+        <h1 style="margin:0; font-size: 1.5rem; display: flex; align-items: center; gap: 10px;">
+            <svg class="icon" style="width:1.4em;height:1.4em;color:var(--primary)"><use href="#icon-car"></use></svg>
+            <span>Samåkning</span>
+        </h1>
+    </header>
+
+    <div id="timeline-container">
+        <!-- Timeline laddas via JS -->
+    </div>
+
+    <div class="main-content">
+        <!-- Vänsterkolumn -->
+        <div id="sidebar">
+            <div class="tabs">
+                <button class="tab-btn active" id="btn-find" onclick="switchTab('find')">Hitta skjuts</button>
+                <button class="tab-btn" id="btn-offer" onclick="switchTab('offer')">Erbjud skjuts</button>
+            </div>
+
+            <div id="tab-find" class="tab-content" style="display: block;">
+                <div id="rides-list"></div>
+            </div>
+
+            <div id="tab-offer" class="tab-content" style="display: none;">
+                <h2 style="margin-top:0">Lägg upp en resa</h2>
+                <div class="form-group">
+                    <label>För- och efternamn (Förare)</label>
+                    <input type="text" id="d-name" placeholder="T.ex. Anna Andersson">
+                </div>
+                <div class="form-group">
+                    <label>Varifrån åker du?</label>
+                    <input type="text" id="d-from" placeholder="T.ex. Malmö eller Gävle">
+                </div>
+                <div class="form-group">
+                    <label>Antal lediga platser i bilen</label>
+                    <input type="number" id="d-seats" value="3" min="1" max="8">
+                </div>
+                <button class="btn" onclick="addRide()">Publicera resa</button>
+            </div>
+        </div>
+
+        <!-- Karta -->
+        <div id="map-container">
+            <div id="map"></div>
+        </div>
+    </div>
+
+    <!-- Boknings-Modal -->
+    <div class="modal-overlay" id="modal" onclick="closeModal(event)">
+        <div class="modal" onclick="event.stopPropagation()">
+            <h2 style="margin-top:0">Boka plats hos <span id="modal-driver" style="color:var(--primary)"></span></h2>
+            <div class="form-group">
+                <label>Förnamn</label>
+                <input type="text" id="b-fn">
+            </div>
+            <div class="form-group">
+                <label>Efternamn</label>
+                <input type="text" id="b-ln">
+            </div>
+            <div class="form-group">
+                <label>E-post</label>
+                <input type="email" id="b-em">
+            </div>
+            <div style="display:flex; gap:15px; margin-top: 30px;">
+                <button class="btn btn-outline" onclick="closeModal(null, true)">Avbryt</button>
+                <button class="btn" onclick="confirmBooking()">Slutför bokning</button>
+            </div>
+        </div>
+    </div>
+
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+
+    <script>
+        let events = [];
+        let rides = [];
+        let activeEvent = null;
+        let selectedRide = null;
+        let hasSeededDemoRides = false;
+        const splashScreen = document.getElementById('splash-screen');
+        const splashStartedAt = Date.now();
+
+        // Initiera karta
+        const map = L.map('map').setView([62, 15], 5);
+        L.tileLayer('https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png', {
+            attribution: '&copy; OpenStreetMap'
+        }).addTo(map); // Bytte kartstil till en renare variant för bättre UX
+        const mapGroup = L.layerGroup().addTo(map);
+
+        const swedishMonths = { "januari": 0, "februari": 1, "mars": 2, "april": 3, "maj": 4, "juni": 5, "juli": 6, "augusti": 7, "september": 8, "oktober": 9, "november": 10, "december": 11 };
+        const cityCoordinates = {
+            "göteborg": { lat: 57.70887, lng: 11.97456 },
+            "stockholm": { lat: 59.32932, lng: 18.06858 },
+            "visby": { lat: 57.6348, lng: 18.29484 },
+            "malmö": { lat: 55.60498, lng: 13.00382 },
+            "gävle": { lat: 60.67488, lng: 17.14127 },
+            "uppsala": { lat: 59.85856, lng: 17.63893 },
+            "västerås": { lat: 59.6099, lng: 16.54481 },
+            "örebro": { lat: 59.27412, lng: 15.2066 },
+            "linköping": { lat: 58.41081, lng: 15.62137 },
+            "jönköping": { lat: 57.78261, lng: 14.16179 },
+            "helsingborg": { lat: 56.04647, lng: 12.69451 },
+            "umeå": { lat: 63.82585, lng: 20.26304 }
+        };
+        const addressCoordinates = {
+            "regeringsgatan 21 stockholm": { lat: 59.33457, lng: 18.06873 },
+            "regeringsgatan 21 stockholom": { lat: 59.33457, lng: 18.06873 }
+        };
+        const demoRideBlueprints = [
+            { driver: "Anna Andersson", from: "Malmö", seats: 3 },
+            { driver: "Johan Eriksson", from: "Uppsala", seats: 2 },
+            { driver: "Fatima Ali", from: "Västerås", seats: 4 },
+            { driver: "Lars Pettersson", from: "Örebro", seats: 1 },
+            { driver: "Sara Lind", from: "Linköping", seats: 2 },
+            { driver: "Mikael Berg", from: "Helsingborg", seats: 3 }
+        ];
+        const routeAnchors = {
+            nynashamn: { lat: 58.9039, lng: 17.9479, label: "Nynäshamn" },
+            visbyPort: { lat: 57.64587, lng: 18.27702, label: "Visby hamn" }
+        };
+
+        function icon(name, style = '') {
+            return `<svg class="icon" ${style ? `style="${style}"` : ''}><use href="#icon-${name}"></use></svg>`;
+        }
+
+        function normalizeLocationKey(value) {
+            return (value || '')
+                .toLowerCase()
+                .normalize('NFD')
+                .replace(/[\u0300-\u036f]/g, '')
+                .replace(/,/g, ' ')
+                .replace(/\s+/g, ' ')
+                .trim();
+        }
+
+        function parseCoordinate(value) {
+            if (typeof value === 'number' && Number.isFinite(value)) return value;
+            if (typeof value !== 'string') return null;
+
+            const normalized = value.trim().replace(',', '.');
+            const parsed = Number(normalized);
+            return Number.isFinite(parsed) ? parsed : null;
+        }
+
+        function extractEventCoordinates(ev) {
+            const coordinatePairs = [
+                [ev.lat, ev.lng],
+                [ev.latitude, ev.longitude],
+                [ev.lat, ev.lon],
+                [ev.location?.lat, ev.location?.lng],
+                [ev.location?.latitude, ev.location?.longitude],
+                [ev.coordinates?.lat, ev.coordinates?.lng],
+                [ev.coordinates?.latitude, ev.coordinates?.longitude]
+            ];
+
+            for (const [rawLat, rawLng] of coordinatePairs) {
+                const lat = parseCoordinate(rawLat);
+                const lng = parseCoordinate(rawLng);
+                if (lat !== null && lng !== null) {
+                    return { lat, lng };
+                }
+            }
+
+            if (typeof ev.coordinates === 'string') {
+                const [rawLat, rawLng] = ev.coordinates.split(/[;,]/).map(part => part.trim());
+                const lat = parseCoordinate(rawLat);
+                const lng = parseCoordinate(rawLng);
+                if (lat !== null && lng !== null) {
+                    return { lat, lng };
+                }
+            }
+
+            const cityMatch = cityCoordinates[(ev.place || '').trim().toLowerCase()];
+            return cityMatch || null;
+        }
+
+        function isOnGotland(point) {
+            if (!point) return false;
+            return point.lat >= 56.9 && point.lat <= 58.5 && point.lng >= 17.8 && point.lng <= 19.5;
+        }
+
+        function getRouteSegments(fromPoint, toPoint) {
+            const fromOnGotland = isOnGotland(fromPoint);
+            const toOnGotland = isOnGotland(toPoint);
+
+            if (fromOnGotland === toOnGotland) {
+                return {
+                    segments: [[[fromPoint.lat, fromPoint.lng], [toPoint.lat, toPoint.lng]]],
+                    skippedWaterCrossing: false
+                };
+            }
+
+            if (fromOnGotland) {
+                return {
+                    segments: [
+                        [[fromPoint.lat, fromPoint.lng], [routeAnchors.visbyPort.lat, routeAnchors.visbyPort.lng]],
+                        [[routeAnchors.nynashamn.lat, routeAnchors.nynashamn.lng], [toPoint.lat, toPoint.lng]]
+                    ],
+                    skippedWaterCrossing: true
+                };
+            }
+
+            return {
+                segments: [
+                    [[fromPoint.lat, fromPoint.lng], [routeAnchors.nynashamn.lat, routeAnchors.nynashamn.lng]],
+                    [[routeAnchors.visbyPort.lat, routeAnchors.visbyPort.lng], [toPoint.lat, toPoint.lng]]
+                ],
+                skippedWaterCrossing: true
+            };
+        }
+
+        function normalizeEvent(ev, index) {
+            const coords = extractEventCoordinates(ev);
+            return {
+                ...ev,
+                id: ev.id || `${ev.title || 'event'}-${index}`,
+                lat: coords?.lat ?? null,
+                lng: coords?.lng ?? null
+            };
+        }
+
+        async function ensureEventCoordinates(ev) {
+            if (typeof ev.lat === 'number' && typeof ev.lng === 'number') return ev;
+
+            const coords = await geocode(ev.place);
+            ev.lat = coords.lat;
+            ev.lng = coords.lng;
+            return ev;
+        }
+
+        async function seedDemoRides() {
+            if (hasSeededDemoRides || events.length === 0) return;
+
+            const seeded = [];
+            for (let i = 0; i < events.length; i++) {
+                const ev = await ensureEventCoordinates(events[i]);
+                const variants = demoRideBlueprints.slice(i, i + 3);
+
+                for (let j = 0; j < variants.length; j++) {
+                    const blueprint = variants[j];
+                    const coords = await geocode(blueprint.from);
+                    seeded.push({
+                        id: 1000 + (i * 10) + j,
+                        event: ev.title,
+                        driver: blueprint.driver,
+                        from: blueprint.from,
+                        lat: coords.lat,
+                        lng: coords.lng,
+                        seats: blueprint.seats
+                    });
+                }
+            }
+
+            rides = seeded;
+            hasSeededDemoRides = true;
+        }
+
+        // --- UX Toast Notifikation ---
+        function showToast(message, isError = false) {
+            const toast = document.getElementById('toast');
+            const iconName = isError ? 'error' : 'check';
+            const iconColor = isError ? 'var(--error)' : 'var(--success)';
+            toast.innerHTML = `<span class="icon-row">${icon(iconName, `color:${iconColor}`)}<span>${message}</span></span>`;
+            toast.style.color = 'var(--text)';
+            toast.classList.add('show');
+            setTimeout(() => toast.classList.remove('show'), 3500);
+        }
+
+        function hideSplashScreen() {
+            const minVisibleMs = 1600;
+            const elapsed = Date.now() - splashStartedAt;
+            const delay = Math.max(0, minVisibleMs - elapsed);
+
+            window.setTimeout(() => {
+                splashScreen.classList.add('hidden');
+                document.body.classList.remove('splash-active');
+            }, delay);
+        }
+
+        async function init() {
+            try {
+                const res = await fetch('https://ambitionsverige.se/wp-json/amb/v1/events');
+                const fetchedEvents = await res.json();
+                events = fetchedEvents.map(normalizeEvent);
+            } catch (e) {
+                events = [
+                    { title: "Seniorfestivalen", place: "Göteborg", day: "21", month: "april", lat: 57.70887, lng: 11.97456 },
+                    { title: "Seniordagen", place: "Stockholm", day: "5", month: "maj", lat: 59.32932, lng: 18.06858 },
+                    { title: "Almedalen", place: "Visby", day: "22", month: "juni", lat: 57.6348, lng: 18.29484 }
+                ].map(normalizeEvent);
+            }
+            
+            events.sort((a,b) => (swedishMonths[a.month.toLowerCase()] || 0) - (swedishMonths[b.month.toLowerCase()] || 0));
+            await seedDemoRides();
+            renderTimeline();
+            if(events.length > 0) selectEvent(0);
+            hideSplashScreen();
+        }
+
+        function renderTimeline() {
+            const container = document.getElementById('timeline-container');
+            container.innerHTML = '';
+            events.forEach((ev, idx) => {
+                const el = document.createElement('div');
+                el.className = `timeline-item ${activeEvent === ev ? 'active' : ''}`;
+                el.onclick = () => selectEvent(idx);
+                el.innerHTML = `
+                    <div style="font-weight:700; color:var(--primary); font-size:0.85rem; text-transform:uppercase; letter-spacing:0.5px;">${ev.day} ${ev.month}</div>
+                    <div style="font-size:1.1rem; font-weight:bold; margin: 4px 0;">${ev.title}</div>
+                    <div class="icon-row" style="color:#64748b; font-size:0.9rem;">${icon('pin', 'color:#64748b')}<span>${ev.place}</span></div>
+                `;
+                container.appendChild(el);
+            });
+        }
+
+        async function selectEvent(idx) {
+            activeEvent = events[idx];
+            renderTimeline();
+
+            await ensureEventCoordinates(activeEvent);
+            renderRides();
+        }
+
+        async function geocode(city) {
+            const normalized = normalizeLocationKey(city);
+            const addressFallback = addressCoordinates[normalized];
+            if (addressFallback) return addressFallback;
+
+            const fallback = cityCoordinates[normalized] || cityCoordinates[(city || '').trim().toLowerCase()];
+            if (fallback) return fallback;
+
+            try {
+                const r = await fetch(`https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(city.split(',')[0])},Sverige`);
+                const d = await r.json();
+                if (Array.isArray(d) && d.length > 0) {
+                    return { lat: parseFloat(d[0].lat), lng: parseFloat(d[0].lon) };
+                }
+            } catch {}
+
+            return { lat: 59.32932, lng: 18.06858 };
+        }
+
+        function switchTab(tab) {
+            document.getElementById('tab-find').style.display = tab === 'find' ? 'block' : 'none';
+            document.getElementById('tab-offer').style.display = tab === 'offer' ? 'block' : 'none';
+            document.getElementById('btn-find').classList.toggle('active', tab === 'find');
+            document.getElementById('btn-offer').classList.toggle('active', tab === 'offer');
+        }
+
+        async function addRide() {
+            const nameInput = document.getElementById('d-name');
+            const fromInput = document.getElementById('d-from');
+            const seatsInput = document.getElementById('d-seats');
+
+            if(!nameInput.value || !fromInput.value) {
+                showToast("Vänligen fyll i namn och startort.", true);
+                return;
+            }
+
+            const btn = event.target;
+            btn.textContent = "Letar plats på kartan...";
+            btn.disabled = true;
+
+            const coords = await geocode(fromInput.value);
+            rides.push({
+                id: Date.now(), event: activeEvent.title, driver: nameInput.value,
+                from: fromInput.value, lat: coords.lat, lng: coords.lng, seats: parseInt(seatsInput.value)
+            });
+
+            // Rensa formulär (UX förbättring)
+            nameInput.value = ''; fromInput.value = ''; seatsInput.value = '3';
+            btn.textContent = "Publicera resa"; btn.disabled = false;
+
+            showToast("Resan har publicerats!");
+            switchTab('find');
+            renderRides();
+        }
+
+        function renderRides() {
+            const list = document.getElementById('rides-list');
+            list.innerHTML = `<h2 style="margin-top:0">Bilar till ${activeEvent.title}</h2>`;
+            mapGroup.clearLayers();
+            let ferryAnchorsDrawn = false;
+
+            // Mål-markör (Hover-tooltip för bättre UX istället för klick-popup)
+            L.marker([activeEvent.lat, activeEvent.lng], {
+                icon: L.icon({ iconUrl: 'https://raw.githubusercontent.com/pointhi/leaflet-color-markers/master/img/marker-icon-2x-red.png', iconSize: [25, 41], iconAnchor: [12, 41] })
+            }).addTo(mapGroup).bindTooltip(`<b>Mål: ${activeEvent.title}</b>`, {permanent: false, direction: 'top'});
+
+            const filtered = rides.filter(r => r.event === activeEvent.title);
+            
+            // Empty State UX
+            if(filtered.length === 0) {
+                list.innerHTML += `
+                    <div class="empty-state">
+                        <div style="margin-bottom:10px; color:var(--primary);">${icon('car', 'color:var(--primary); width:3rem; height:3rem;')}</div>
+                        <p>Ingen har registrerat en resa hit ännu.</p>
+                        <button class="btn" onclick="switchTab('offer')">Bli den första att erbjuda skjuts!</button>
+                    </div>`;
+            }
+
+            filtered.forEach(r => {
+                const card = document.createElement('div');
+                const routeInfo = getRouteSegments(r, activeEvent);
+                const ferryNote = routeInfo.skippedWaterCrossing
+                    ? `<div style="margin-top:10px; color:#0f766e; font-size:0.85rem;">Via färjeläge. Ingen linje visas över vatten.</div>`
+                    : '';
+                card.className = 'ride-card';
+                card.innerHTML = `
+                    <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom: 10px;">
+                        <strong style="font-size:1.1rem">${r.driver}</strong>
+                        <span class="icon-row" style="background:#e0f2fe; color:#0369a1; padding:4px 10px; border-radius:20px; font-weight:bold; font-size:0.85rem;">
+                            ${icon('seat', 'color:#0369a1')}
+                            <span>${r.seats} platser</span>
+                        </span>
+                    </div>
+                    <div class="icon-row" style="color:#64748b; margin-bottom:15px; font-size:0.95rem;">
+                        ${icon('pin', 'color:#64748b')}
+                        <span>Åker från: <b>${r.from}</b></span>
+                    </div>
+                    ${ferryNote}
+                    <button class="btn ${r.seats === 0 ? 'btn-outline' : ''}" style="padding:12px; font-size:0.95rem;" 
+                            onclick="openBooking(${r.id})" ${r.seats === 0 ? 'disabled' : ''}>
+                        ${r.seats === 0 ? 'Bilen är full' : 'Boka din plats'}
+                    </button>
+                `;
+                list.appendChild(card);
+
+                // UX-förbättring: Tooltip (hover) istället för Popup (klick)
+                L.marker([r.lat, r.lng]).addTo(mapGroup)
+                 .bindTooltip(`${r.driver} (${r.seats} platser kvar)`, {direction: 'top'});
+
+                routeInfo.segments.forEach(segment => {
+                    L.polyline(segment, {
+                        color: 'var(--primary)', weight: 4, opacity: 0.6, dashArray: '8, 12'
+                    }).addTo(mapGroup);
+                });
+
+                if (routeInfo.skippedWaterCrossing) {
+                    if (!ferryAnchorsDrawn) {
+                        L.circleMarker([routeAnchors.nynashamn.lat, routeAnchors.nynashamn.lng], {
+                            radius: 5,
+                            color: '#0f766e',
+                            weight: 2,
+                            fillColor: '#ccfbf1',
+                            fillOpacity: 1
+                        }).addTo(mapGroup).bindTooltip('Färjeläge: Nynäshamn', {direction: 'top'});
+
+                        L.circleMarker([routeAnchors.visbyPort.lat, routeAnchors.visbyPort.lng], {
+                            radius: 5,
+                            color: '#0f766e',
+                            weight: 2,
+                            fillColor: '#ccfbf1',
+                            fillOpacity: 1
+                        }).addTo(mapGroup).bindTooltip('Färjeläge: Visby hamn', {direction: 'top'});
+
+                        ferryAnchorsDrawn = true;
+                    }
+                }
+            });
+
+            if(filtered.length > 0) {
+                const bounds = L.latLngBounds([[activeEvent.lat, activeEvent.lng], ...filtered.map(r => [r.lat, r.lng])]);
+                map.flyToBounds(bounds, {padding: [50, 50], duration: 1.5}); // Mjukare animering
+            } else {
+                map.flyTo([activeEvent.lat, activeEvent.lng], 9, {duration: 1.5});
+            }
+        }
+
+        // --- Hantera Modal ---
+        const modalOverlay = document.getElementById('modal');
+        const modalContent = modalOverlay.querySelector('.modal');
+
+        function openBooking(id) {
+            selectedRide = rides.find(r => r.id === id);
+            document.getElementById('modal-driver').textContent = selectedRide.driver;
+            modalOverlay.style.display = 'flex';
+            setTimeout(() => {
+                modalOverlay.style.opacity = '1';
+                modalContent.style.transform = 'scale(1)';
+            }, 10);
+        }
+
+        function closeModal(event, force = false) {
+            // Stängs om man trycker på Avbryt eller klickar på bakgrunden
+            if(force || (event && event.target === modalOverlay)) {
+                modalOverlay.style.opacity = '0';
+                modalContent.style.transform = 'scale(0.95)';
+                setTimeout(() => {
+                    modalOverlay.style.display = 'none';
+                    // Rensa fält
+                    document.getElementById('b-fn').value = '';
+                    document.getElementById('b-ln').value = '';
+                    document.getElementById('b-em').value = '';
+                }, 300);
+            }
+        }
+        
+        function confirmBooking() {
+            const fn = document.getElementById('b-fn').value;
+            const ln = document.getElementById('b-ln').value;
+            
+            if(!fn || !ln) return showToast("Fyll i ditt namn för att boka.", true);
+
+            if(selectedRide.seats > 0) {
+                selectedRide.seats--;
+                closeModal(null, true);
+                showToast(`Din plats hos ${selectedRide.driver} är bokad!`);
+                renderRides();
+            }
+        }
+
+        init();
+    </script>
+
+    </div>
+</body>
+</html>
